@@ -6,7 +6,6 @@ const configResolver = require('./../modules/configResolver')
 const firebase = require('firebase')
 const channels = ['D3YDSKCEL', 'D3Z7WTKGV']
 const users = ['U3ZC0R1RV']
-
 const firebaseConfig = {
   apiKey: "AIzaSyDqUXg0apDjKGY5h22oRM1R0crt-iDT7t8",
   authDomain: "communityquiz-26ec5.firebaseapp.com",
@@ -16,24 +15,24 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 
+// multi step
+const startQuiz = (message) => sendMessageToChannel(message).then(writeUserQuestionRefference(message))
+const recordAnswer = (user, answer) => getCurrentQuestion(user, answer).then(writeAnswerData).then()
+
 router.post('/events', function (req, res) {
+  console.log('answer event')
   let user = req.body.event.user
   let answer = req.body.event.text
   if (channels.includes(req.body.event.channel) && !req.body.event.bot_id) {
-    //console.log('writing answer data')
-    writeAnswerData(user, answer)
+    console.log('writing answer data')
+    recordAnswer(user, answer)
   } else {
-    //console.log('miss in events post')
+    console.log('miss in events post')
   }
   res.send('ok')
 })
 
 router.post('/start', function (req, res) {
-
-  // slack.send('users.list', {token: configResolver.getConfigVariable('API_TOKEN')}).then(users => {
-  //   console.log(users)
-  // })
-
   let message = {
     channel: 'U3ZC0R1RV',
     as_user: true,
@@ -41,42 +40,60 @@ router.post('/start', function (req, res) {
     text: 'First question??',
     attachments: []
   }
-
-  slack.send('chat.postMessage', message).then(data => {
-    writeUserQuestionRefference(message.channel, data.channel, data.message.text)
-  })
-
+  startQuiz(message)
   res.send('ok')
 })
 
 module.exports = router
 
-writeUserQuestionRefference = (userId, channel, question) => {
-  firebase.database().ref('questions/' + userId).set({
-    userId: userId,
-    channel: channel,
-    question: question,
+sendMessageToChannel = (message) => {
+  console.log('send message to channel')
+  return slack.send('chat.postMessage', message)
+}
+
+writeUserQuestionRefference = (message) => {
+  console.log('write question reference')
+
+  return firebase.database().ref('questions/' + message.channel).set({
+    userId: message.channel,
+    question: message.text,
     date: Date.now()
+  }).then( resp => {return(message.channel)})
+}
+
+getCurrentQuestion = (user, answer) => {
+  console.log('get current question')
+
+  return firebase.database().ref('/questions/' + user).once('value').then(snapshot => {
+    return {
+      'question': snapshot.val().question,
+      'user': user,
+      'answer': answer
+    }
   })
 }
 
-getCurrentQuestion = (userId) => {
-  firebase.database().ref('/questions/' + userId).once('value').then(snapshot => {
-    return snapshot.val() || []
+writeAnswerData = (data) => {
+  console.log('write answer data')
+  firebase.database().ref('questions/' + data.user).set({
+    userId: data.user,
+    question: 'Next question??',
+    date: Date.now()
+  }).then(data => {
+    let message = {
+      channel: 'U3ZC0R1RV',
+      as_user: true,
+      token: configResolver.getConfigVariable('API_TOKEN'),
+      text: 'Next question??',
+      attachments: []
+    }
+    startQuiz(message)
   })
-}
 
-writeAnswerData = (userId, answer) => {
-  // firebase.database().ref('questions/' + userId).set({
-  //   userId: userId,
-  //   channel: channel,
-  //   question: 'Next question??',
-  //   date: Date.now()
-  // })
-
-  firebase.database().ref('answers/' + userId).set({
-    user: userId,
-    answer: answer,
+  return firebase.database().ref('answers/' + data.user + '/' + Date.now()).set({
+    user: data.user,
+    answer: data.answer,
+    question: data.question,
     date: Date.now()
   })
 }
